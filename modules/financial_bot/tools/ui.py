@@ -103,7 +103,7 @@ def load_bot(
     bot = FinancialBot(
         model_cache_dir=Path(model_cache_dir) if model_cache_dir else None,
         embedding_model_device=embedding_model_device,
-        streaming=True,
+        streaming=False,
         debug=debug,
     )
 
@@ -148,7 +148,9 @@ def predict(message: str, history: List[List[str]], about_me: str) -> str:
         for partial_answer in bot.stream_answer():
             yield partial_answer
     else:
-        yield bot.answer(**generate_kwargs)
+        t = bot.answer(**generate_kwargs)
+        print(f"######################### {t} #########################")
+        yield t
 
 
 demo = gr.ChatInterface(

@@ -11,6 +11,7 @@ from financial_bot.chains import (
     ContextExtractorChain,
     FinancialBotQAChain,
     StatelessMemorySequentialChain,
+    ChatGPTChain,
 )
 from financial_bot.embeddings import EmbeddingModelSingleton
 from financial_bot.handlers import CometLLMMonitoringHandler
@@ -89,34 +90,14 @@ class FinancialBot:
     def build_chain(self) -> chains.SequentialChain:
         """
         Constructs and returns a financial bot chain.
-        This chain is designed to take as input the user description, `about_me` and a `question` and it will
-        connect to the VectorDB, searches the financial news that rely on the user's question and injects them into the
-        payload that is further passed as a prompt to a financial fine-tuned LLM that will provide answers.
-
-        The chain consists of two primary stages:
-        1. Context Extractor: This stage is responsible for embedding the user's question,
-        which means converting the textual question into a numerical representation.
-        This embedded question is then used to retrieve relevant context from the VectorDB.
-        The output of this chain will be a dict payload.
-
-        2. LLM Generator: Once the context is extracted,
-        this stage uses it to format a full prompt for the LLM and
-        then feed it to the model to get a response that is relevant to the user's question.
-
-        Returns
-        -------
-        chains.SequentialChain
-            The constructed financial bot chain.
-
-        Notes
-        -----
-        The actual processing flow within the chain can be visualized as:
-        [about: str][question: str] > ContextChain >
-        [about: str][question:str] + [context: str] > FinancialChain >
-        [answer: str]
         """
+        logger.info("Building 1/4 - ChatGPTChain")
+        chatgpt_chain = ChatGPTChain(
+            api_key=os.getenv("OPENAI_API_KEY"),  # Ensure your API key is set in the environment
+            model="gpt-4o-mini",
+        )
 
-        logger.info("Building 1/3 - ContextExtractorChain")
+        logger.info("Building 2/4 - ContextExtractorChain")
         context_retrieval_chain = ContextExtractorChain(
             embedding_model=self._embd_model,
             vector_store=self._qdrant_client,
@@ -124,7 +105,7 @@ class FinancialBot:
             top_k=self._vector_db_search_topk,
         )
 
-        logger.info("Building 2/3 - FinancialBotQAChain")
+        logger.info("Building 3/4 - FinancialBotQAChain")
         if self._debug:
             callabacks = []
         else:
@@ -149,7 +130,7 @@ class FinancialBot:
             callbacks=callabacks,
         )
 
-        logger.info("Building 3/3 - Connecting chains into SequentialChain")
+        logger.info("Building 4/4 - Connecting chains into SequentialChain")
         seq_chain = StatelessMemorySequentialChain(
             history_input_key="to_load_history",
             memory=ConversationBufferWindowMemory(
@@ -158,7 +139,7 @@ class FinancialBot:
                 output_key="answer",
                 k=3,
             ),
-            chains=[context_retrieval_chain, llm_generator_chain],
+            chains=[chatgpt_chain, context_retrieval_chain, llm_generator_chain],
             input_variables=["about_me", "question", "to_load_history"],
             output_variables=["answer"],
             verbose=True,
@@ -168,6 +149,7 @@ class FinancialBot:
         logger.info("Workflow:")
         logger.info(
             """
+            [about: str][question: str] > ChatGPTChain > 
             [about: str][question: str] > ContextChain > 
             [about: str][question:str] + [context: str] > FinancialChain > 
             [answer: str]
@@ -175,6 +157,97 @@ class FinancialBot:
         )
 
         return seq_chain
+
+
+    # def build_chain(self) -> chains.SequentialChain:
+    #     """
+    #     Constructs and returns a financial bot chain.
+    #     This chain is designed to take as input the user description, `about_me` and a `question` and it will
+    #     connect to the VectorDB, searches the financial news that rely on the user's question and injects them into the
+    #     payload that is further passed as a prompt to a financial fine-tuned LLM that will provide answers.
+
+    #     The chain consists of two primary stages:
+    #     1. Context Extractor: This stage is responsible for embedding the user's question,
+    #     which means converting the textual question into a numerical representation.
+    #     This embedded question is then used to retrieve relevant context from the VectorDB.
+    #     The output of this chain will be a dict payload.
+
+    #     2. LLM Generator: Once the context is extracted,
+    #     this stage uses it to format a full prompt for the LLM and
+    #     then feed it to the model to get a response that is relevant to the user's question.
+
+    #     Returns
+    #     -------
+    #     chains.SequentialChain
+    #         The constructed financial bot chain.
+
+    #     Notes
+    #     -----
+    #     The actual processing flow within the chain can be visualized as:
+    #     [about: str][question: str] > ContextChain >
+    #     [about: str][question:str] + [context: str] > FinancialChain >
+    #     [answer: str]
+    #     """
+
+    #     logger.info("Building 1/3 - ContextExtractorChain")
+    #     context_retrieval_chain = ContextExtractorChain(
+    #         embedding_model=self._embd_model,
+    #         vector_store=self._qdrant_client,
+    #         vector_collection=self._vector_collection_name,
+    #         top_k=self._vector_db_search_topk,
+    #     )
+
+    #     logger.info("Building 2/3 - FinancialBotQAChain")
+    #     if self._debug:
+    #         callabacks = []
+    #     else:
+    #         try:
+    #             comet_project_name = os.environ["COMET_PROJECT_NAME"]
+    #         except KeyError:
+    #             raise RuntimeError(
+    #                 "Please set the COMET_PROJECT_NAME environment variable."
+    #             )
+    #         callabacks = [
+    #             CometLLMMonitoringHandler(
+    #                 project_name=f"{comet_project_name}-monitor-prompts",
+    #                 llm_model_id=self._llm_model_id,
+    #                 llm_qlora_model_id=self._llm_qlora_model_id,
+    #                 llm_inference_max_new_tokens=self._llm_inference_max_new_tokens,
+    #                 llm_inference_temperature=self._llm_inference_temperature,
+    #             )
+    #         ]
+    #     llm_generator_chain = FinancialBotQAChain(
+    #         hf_pipeline=self._llm_agent,
+    #         template=self._llm_template,
+    #         callbacks=callabacks,
+    #     )
+
+    #     logger.info("Building 3/3 - Connecting chains into SequentialChain")
+    #     seq_chain = StatelessMemorySequentialChain(
+    #         history_input_key="to_load_history",
+    #         memory=ConversationBufferWindowMemory(
+    #             memory_key="chat_history",
+    #             input_key="question",
+    #             output_key="answer",
+    #             k=3,
+    #         ),
+    #         chains=[context_retrieval_chain, llm_generator_chain],
+    #         input_variables=["about_me", "question", "to_load_history"],
+    #         output_variables=["answer"],
+    #         verbose=True,
+    #     )
+
+    #     logger.info("Done building SequentialChain.")
+    #     logger.info("Workflow:")
+    #     logger.info(
+    #         """
+    #         [about: str][question: str] > ContextChain > 
+    #         [about: str][question:str] + [context: str] > FinancialChain > 
+    #         [answer: str]
+    #         """
+    #     )
+
+    #     return seq_chain
 
     def answer(
         self,
@@ -221,3 +294,7 @@ class FinancialBot:
                 partial_answer += new_token
 
                 yield partial_answer
+
+
+
+

@@ -16,7 +16,7 @@ from unstructured.cleaners.core import (
 
 from financial_bot.embeddings import EmbeddingModelSingleton
 from financial_bot.template import PromptTemplate
-
+from openai import ChatCompletion  # Use OpenAI's Python library for ChatGPT calls
 
 class StatelessMemorySequentialChain(chains.SequentialChain):
     """
@@ -102,7 +102,7 @@ class ContextExtractorChain(Chain):
 
     @property
     def input_keys(self) -> List[str]:
-        return ["about_me", "question"]
+        return ["about_me", "chatgpt_response"]
 
     @property
     def output_keys(self) -> List[str]:
@@ -186,7 +186,7 @@ class FinancialBotQAChain(Chain):
                 "user_context": inputs["about_me"],
                 "news_context": inputs["context"],
                 "chat_history": inputs["chat_history"],
-                "question": inputs["question"],
+                "question": inputs["chatgpt_response"],
             }
         )
 
@@ -224,3 +224,65 @@ class FinancialBotQAChain(Chain):
             inputs[key] = cleaned_input
 
         return inputs
+
+
+
+
+
+
+class ChatGPTChain(Chain):
+    """A custom chain to interact with ChatGPT."""
+
+    # input_key = "question"  # Define the input key for the chain
+    # output_key = "chatgpt_response"  # Define the output key for the chain
+
+    api_key: str
+    model: str
+
+    # def __init__(self,  model: str = "gpt-4o-mini",api_key: str|None = None):
+        
+    #     super().__init__()
+    #     if api_key is None:
+    #         api_key = os.getenv("OPENAI_API_KEY")
+    #     self.api_key = api_key
+    #     self.model = model
+
+    def _call(self, inputs: dict) -> dict:
+        """
+        Call the ChatGPT API to get a response.
+
+        Parameters
+        ----------
+        inputs : dict
+            The input dictionary containing the question.
+
+        Returns
+        -------
+        dict
+            The output dictionary containing the ChatGPT response.
+        """
+        import openai
+        from openai import OpenAI
+        import os
+        openai.api_key = self.api_key
+        question = inputs[self.input_keys[0]]
+        
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": f"Optimize this question according to prompt engineering guide lines: {question}"}],
+        )
+        
+        response_c = response.choices[0].message.content
+        print(f"####################################################################       chatgpt response: {response_c}")
+        return {"chatgpt_response": response_c}
+        # return {"chatgpt_response": "Should i invest in stocks?"}
+
+    @property
+    def input_keys(self) -> List[str]:
+        return ["question"]
+
+    @property
+    def output_keys(self) -> List[str]:
+        return ["chatgpt_response"]
+
